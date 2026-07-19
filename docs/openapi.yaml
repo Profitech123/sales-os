@@ -1,0 +1,156 @@
+openapi: 3.0.3
+info:
+  title: Sales OS Backend API
+  description: >
+    Webhook listener and lead-research automation for the Sales OS
+    second-brain. All endpoints read/write Markdown + YAML frontmatter files
+    under `second-brain/` — there is no database.
+  version: 1.0.0
+servers:
+  - url: http://localhost:3001
+    description: Local development
+
+paths:
+  /health:
+    get:
+      summary: Liveness check
+      operationId: getHealth
+      tags: [Meta]
+      responses:
+        "200":
+          description: Service is up
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+
+  /webhooks/meeting-ended:
+    post:
+      summary: Generate a follow-up email and proposal from a meeting transcript
+      description: >
+        Call this after a sales call ends. Claude drafts a follow-up email
+        (saved to `second-brain/outbox/*.txt`) and a commercial proposal
+        (saved to `second-brain/deals/*.md` with YAML frontmatter so the
+        dashboard picks it up). Every generated document is constrained by
+        the Sales OS business rules (no "Phase 3: Growth (Months 5-6)"
+        timeline section; "Clap Coffee" branding for coffee-automation
+        projects; framed around ANPR drive-thru displays, self-checkout
+        micromarts, and FastAPI financial-document extraction).
+      operationId: postMeetingEnded
+      tags: [Webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MeetingEndedRequest"
+            examples:
+              basic:
+                value:
+                  meetingId: "cal-2026-07-19-001"
+                  transcript: >
+                    AE: Thanks for hopping on. Tell me about your current
+                    drive-thru setup...
+                    Prospect: We're running legacy menu boards, no plate
+                    recognition yet...
+                  attendees: ["Jamie (AE)", "Marta Kola (QuickServe)"]
+      responses:
+        "201":
+          description: Follow-up email and proposal were generated and saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MeetingEndedResponse"
+        "400":
+          description: Missing required fields
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: The AI call failed or returned unparseable output
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /routines/lead-research/run:
+    post:
+      summary: Manually trigger the lead-research routine
+      description: >
+        Runs the same logic as the daily 07:00 cron on demand: scrapes
+        `TARGET_LINKEDIN_URL` via the Apify `automation-lab/linkedin-profile-scraper`
+        actor, asks Claude for a sales brief with a 0-100 lead score and
+        exactly 3 next steps, and saves it to `second-brain/deals/*.md`.
+      operationId: postLeadResearchRun
+      tags: [Routines]
+      responses:
+        "200":
+          description: >
+            Research ran. `file` is null if `TARGET_LINKEDIN_URL` is not
+            configured (the routine no-ops rather than erroring).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LeadResearchResponse"
+        "502":
+          description: Scraping or AI generation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+components:
+  schemas:
+    MeetingEndedRequest:
+      type: object
+      required: [meetingId, transcript]
+      properties:
+        meetingId:
+          type: string
+          example: "cal-2026-07-19-001"
+        transcript:
+          type: string
+          description: Raw meeting transcript text
+        attendees:
+          type: array
+          items:
+            type: string
+          example: ["Jamie (AE)", "Marta Kola (QuickServe)"]
+
+    MeetingEndedResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          example: true
+        files:
+          type: object
+          properties:
+            email:
+              type: string
+              description: Absolute path to the saved follow-up email (.txt)
+            proposal:
+              type: string
+              description: Absolute path to the saved proposal (.md)
+
+    LeadResearchResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          example: true
+        file:
+          type: string
+          nullable: true
+          description: Absolute path to the saved brief, or null if skipped
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string

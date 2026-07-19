@@ -25,23 +25,21 @@ NON-NEGOTIABLE BUSINESS RULES — apply to every document you produce:
    - Backend data extraction via FastAPI for financial documents
 `;
 
+// Test seam: lets the test suite substitute a fake transport so unit/e2e
+// tests never hit the real Anthropic API. Production code never sets this.
+let transportOverride = null;
+export function __setTestTransport(fn) {
+  transportOverride = fn;
+}
+
 /**
  * Call Claude and parse a strict-JSON answer. Strips markdown code fences if
  * the model wraps its response in them.
  */
 export async function askClaudeForJson({ system, user, maxTokens = 4096 }) {
-  const response = await anthropic.messages.create({
-    model: CLAUDE_MODEL,
-    max_tokens: maxTokens,
-    system,
-    messages: [{ role: "user", content: user }],
-  });
-
-  const raw = response.content
-    .filter((block) => block.type === "text")
-    .map((block) => block.text)
-    .join("\n")
-    .trim();
+  const raw = transportOverride
+    ? await transportOverride({ system, user, maxTokens })
+    : await callAnthropic({ system, user, maxTokens });
 
   const jsonText = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
 
@@ -52,4 +50,19 @@ export async function askClaudeForJson({ system, user, maxTokens = 4096 }) {
       `Claude returned non-JSON output: ${error.message}\n--- raw output ---\n${raw}`
     );
   }
+}
+
+async function callAnthropic({ system, user, maxTokens }) {
+  const response = await anthropic.messages.create({
+    model: CLAUDE_MODEL,
+    max_tokens: maxTokens,
+    system,
+    messages: [{ role: "user", content: user }],
+  });
+
+  return response.content
+    .filter((block) => block.type === "text")
+    .map((block) => block.text)
+    .join("\n")
+    .trim();
 }

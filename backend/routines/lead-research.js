@@ -9,6 +9,26 @@ import { PATHS, slugify, todayStamp } from "../lib/paths.js";
 
 const APIFY_ACTOR = "automation-lab/linkedin-profile-scraper";
 
+// Test seam: lets the test suite substitute a fake scraper so tests never
+// hit the real Apify API. Production code never sets this.
+let scraperOverride = null;
+export function __setTestScraper(fn) {
+  scraperOverride = fn;
+}
+
+async function scrapeProfile(targetUrl) {
+  if (scraperOverride) return scraperOverride(targetUrl);
+
+  const apify = new ApifyClient({ token: process.env.APIFY_TOKEN });
+  console.log(`[lead-research] scraping ${targetUrl}`);
+  const run = await apify.actor(APIFY_ACTOR).call({ profileUrls: [targetUrl] });
+  const { items } = await apify.dataset(run.defaultDatasetId).listItems();
+  if (!items.length) {
+    throw new Error("Apify returned no profile data.");
+  }
+  return items[0];
+}
+
 const SYSTEM_PROMPT = `You are the lead-research engine of a Sales Operating System for a
 retail-technology integrator. Given scraped LinkedIn profile data, produce a
 sales brief that helps an account executive prepare outreach.
@@ -33,18 +53,8 @@ export async function runLeadResearch() {
     return null;
   }
 
-  const apify = new ApifyClient({ token: process.env.APIFY_TOKEN });
-
   // 1. Scrape the profile.
-  console.log(`[lead-research] scraping ${targetUrl}`);
-  const run = await apify.actor(APIFY_ACTOR).call({
-    profileUrls: [targetUrl],
-  });
-  const { items } = await apify.dataset(run.defaultDatasetId).listItems();
-  if (!items.length) {
-    throw new Error("Apify returned no profile data.");
-  }
-  const profile = items[0];
+  const profile = await scrapeProfile(targetUrl);
 
   // 2. Turn raw profile JSON into an actionable brief.
   const brief = await askClaudeForJson({
