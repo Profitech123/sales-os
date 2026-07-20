@@ -1,11 +1,9 @@
 // Daily lead-research routine (07:00).
 // Scrapes a target LinkedIn profile via Apify, asks Claude for a sales brief
 // with a lead score + 3 next steps, and files it into /second-brain/deals.
-import fs from "node:fs/promises";
-import path from "node:path";
 import { ApifyClient } from "apify-client";
 import { askClaudeForJson, BUSINESS_RULES } from "../lib/anthropic.js";
-import { PATHS, slugify, todayStamp } from "../lib/paths.js";
+import { saveSecondBrainFile, slugify, todayStamp } from "../lib/paths.js";
 
 const APIFY_ACTOR = "automation-lab/linkedin-profile-scraper";
 
@@ -65,15 +63,16 @@ export async function runLeadResearch() {
   // 3. Persist as Markdown + YAML frontmatter so the dashboard can render it.
   const stamp = todayStamp();
   const slug = slugify(brief.company ?? brief.lead_name ?? "lead");
-  const filePath = path.join(PATHS.deals, `${stamp}-${slug}.md`);
+  const filename = `${stamp}-${slug}.md`;
 
   const nextStepsYaml = (brief.next_steps ?? [])
     .map((step) => `  - "${String(step).replace(/"/g, '\\"')}"`)
     .join("\n");
 
-  await fs.writeFile(
-    filePath,
-    [
+  const filePath = await saveSecondBrainFile({
+    dirKey: "deals",
+    filename,
+    content: [
       "---",
       `company: "${brief.company}"`,
       `lead_name: "${brief.lead_name}"`,
@@ -88,8 +87,8 @@ export async function runLeadResearch() {
       brief.brief_markdown,
       "",
     ].join("\n"),
-    "utf8"
-  );
+    commitMessage: `Lead research: ${brief.company}`,
+  });
 
   console.log(`[lead-research] brief saved → ${filePath}`);
   return filePath;

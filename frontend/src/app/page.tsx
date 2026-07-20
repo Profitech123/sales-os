@@ -69,8 +69,8 @@ const PIPELINE_STATS = [
   { label: "Meetings Booked", value: "18", icon: CalendarCheck },
 ];
 
-export default function DashboardPage() {
-  const deals = getDeals();
+export default async function DashboardPage() {
+  const deals = await getDeals();
 
   return (
     <main className="min-h-screen bg-zinc-50 px-6 py-10">
